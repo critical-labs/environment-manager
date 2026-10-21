@@ -113,11 +113,11 @@ npx environment-manager rotate production --apply        # rotate everything rot
 npx environment-manager rotate production --apply --secret session-secret
 ```
 
-A rotation writes the new value to 1Password first, then pushes your secrets to GitHub and any OIDC databases, so they are updated in the same step. Claude Code settings are only updated by `sync --apply`. Anything else that reads the secret, such as a `.env` file on a server, picks up the new value the next time you render it.
+A rotation writes the new value to 1Password first, then pushes the secrets it rotated to GitHub and updates any OIDC databases, so they change in the same step. Claude Code settings are only updated by `sync --apply`. Anything else that reads the secret, such as a `.env` file on a server, picks up the new value the next time you render it.
 
 `rotationIntervalDays` says how often a secret should change. `rotate --due` rotates only the secrets that are overdue. For secrets you rotate by hand, run `npx environment-manager record production deploy-key` afterwards to restart the clock; `sync` and `rotate` warn about any that are overdue.
 
-The rotation history is kept in `.environment-manager/rotation-state.json` on each machine. Add it to `.gitignore`.
+The rotation history is kept on each machine, outside the repository: in `~/Library/Application Support/environment-manager/` on macOS and `~/.local/state/environment-manager/` elsewhere.
 
 ## Scheduled rotation on macOS
 
@@ -129,15 +129,22 @@ npx environment-manager schedule status production
 npx environment-manager schedule uninstall production
 ```
 
-`install` adds a LaunchAgent that runs `npx @critical-labs/environment-manager@<version> rotate production --due --apply --notify` from your repository when you log in and every day at 10:00 (change it with `--hour`). On a day with nothing due it exits without contacting 1Password. Otherwise it rotates what is due and shows a notification with the result. Logs are in `~/Library/Logs/environment-manager/`.
+`install` adds a LaunchAgent that runs `rotate production --due --apply --notify` when you log in and every day at 10:00 (change it with `--hour`). On a day with nothing due it exits without contacting 1Password. Otherwise it rotates what is due and shows a notification with the result. Logs are in `~/Library/Logs/environment-manager/`.
 
-The agent asks for the version of this package that installed it, so after upgrading, run `schedule install` again. npx resolves that version using your npm configuration, including any `.npmrc` in the repository.
+The agent does not run from your repository. `install` copies two things into `~/Library/Application Support/environment-manager/`:
+
+- this release of the package, downloaded from the public npm registry and checked against the registry's integrity hash, with no install scripts;
+- your `rotation.yaml` as it is now.
+
+The agent uses only those copies, so pulling a commit or checking out a branch never changes what it does, and it works even when the repository is in a folder macOS keeps background jobs out of, such as `~/Documents`. After you change `rotation.yaml` or upgrade the package, run `schedule install` again. `schedule status` tells you when the repository's `rotation.yaml` no longer matches the copy.
+
+A scheduled rotation of an `op-service-account` secret cannot update the settings file in your repository. Run `npx environment-manager sync production --apply` there afterwards; the notification reminds you.
 
 On other systems, run `npx environment-manager rotate production --due --apply` from cron or a CI schedule.
 
 ## Treat the configuration as code
 
-`rotation.yaml` decides where your secrets go, and the tool acts with your 1Password, GitHub, and Claude Code access. A malicious change to it could send secrets to someone else's repository. Review changes to `.environment-manager/` like code, and do not install the schedule in a clone where you check out branches you have not reviewed.
+`rotation.yaml` decides where your secrets go, and the tool acts with your 1Password, GitHub, and Claude Code access. A malicious change to it could send secrets to someone else's repository. Review changes to `.environment-manager/` like code, and read the diff before re-running `schedule install`.
 
 ## Environments
 
@@ -145,7 +152,7 @@ The environment name, `production` above, picks the manifest file (`production.m
 
 ## Credentials the tool itself needs
 
-`toolEnv` in `rotation.yaml` loads credentials for the tool from 1Password before a command runs:
+`toolEnv` in `rotation.yaml` loads credentials for the tool from 1Password before a command runs. Every value must be an `op://` reference:
 
 ```yaml
 toolEnv:
@@ -186,6 +193,13 @@ If you run your own OIDC provider, the `idp-client` type keeps a client's secret
 ```
 
 When the secret changes, the old value moves to `previous_client_secret`, so a provider that checks both columns keeps accepting it while clients update. The tool does not clear that column; the old secret stays valid until the next rotation.
+
+## Security notes
+
+- **Fingerprints.** `verify` relies on truncated SHA-256 fingerprints stored as GitHub repository variables. They do not reveal long random secrets, but they would let someone with read access confirm a guess at a short or predictable one.
+- **Writing to 1Password.** The tool writes new values with `op item edit`, which takes them as command-line arguments. While that command runs, other users on the same machine can see the value in the process list. Run rotations on a machine you do not share.
+- **Old service accounts.** Rotating an `op-service-account` secret creates a new service account and leaves the old one valid until it expires. The 1Password CLI cannot delete service accounts; revoke old ones on 1Password.com.
+- **OIDC clients.** The previous client secret stays valid until the next rotation.
 
 ## Commands
 

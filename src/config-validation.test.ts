@@ -42,13 +42,8 @@ describe('validateRotationConfig — toolEnv', () => {
     expect(errors[0]).toContain('segment')
   })
 
-  it('accepts non-op:// plain values without segment check', () => {
-    const config: RotationConfig = {
-      toolEnv: { SOME_VAR: 'plain-value' },
-      databases: [],
-      secrets: [],
-    }
-
-    expect(validateRotationConfig(config)).toEqual([])
+  it('rejects a literal toolEnv value', () => {
+    const errors = validateRotationConfig({ toolEnv: { GITHUB_TOKEN: 'ghp_attacker' }, databases: [], secrets: [] })
+    expect(errors).toEqual(['toolEnv "GITHUB_TOKEN" must be an op:// reference, not a literal value'])
   })
 })

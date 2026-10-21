@@ -118,10 +118,7 @@ export async function rotateSecret(
       const { execFile } = await import('node:child_process')
       const { promisify } = await import('node:util')
       const execFileAsync = promisify(execFile)
-      const { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } = await import('node:fs')
-      const { dirname } = await import('node:path')
 
-      // 1. Create new service account
       console.log(`[rotate] Creating new 1Password service account "${cfg.accountName}"...`)
       const { stdout: token } = await execFileAsync('op', [
         'service-account', 'create', cfg.accountName,
@@ -132,22 +129,24 @@ export async function rotateSecret(
       value = token.trim()
       console.log(`[rotate] Service account created (token length: ${value.length})`)
 
-      // 2. Update .claude/settings.local.json
-      console.log(`[rotate] Updating ${cfg.settingsLocalPath}...`)
-      // The account already exists: a missing file must not lose its token.
-      if (!existsSync(cfg.settingsLocalPath)) mkdirSync(dirname(cfg.settingsLocalPath), { recursive: true })
-      const settings = existsSync(cfg.settingsLocalPath)
-        ? JSON.parse(readFileSync(cfg.settingsLocalPath, 'utf-8'))
-        : {}
-      if (!settings.env) settings.env = {}
-      settings.env.OP_SERVICE_ACCOUNT_TOKEN = value
-      // The file now holds a live token: owner-only, whether it is new or existed already.
-      writeFileSync(cfg.settingsLocalPath, JSON.stringify(settings, null, 2) + '\n', { encoding: 'utf-8', mode: 0o600 })
-      chmodSync(cfg.settingsLocalPath, 0o600)
+      // The account exists now: store its token before anything else can fail.
+      if (secret.onePassword) {
+        await adapters.secrets.write(secret.onePassword.itemId, resolveOpField(secret.onePassword.field, env), value)
+      }
 
-      // GitHub push is handled by sync --apply via reconcileGitHubSecrets
-
-      break
+      // biome-ignore lint/nursery/noProcessEnv: the scheduled job sets it
+      if (process.env.EM_SCHEDULED) {
+        console.log(`[rotate] Scheduled run: left ${cfg.settingsLocalPath} alone; run \`environment-manager sync ${env} --apply\` in the repository to update it`)
+      } else {
+        try {
+          const { writeSettingsToken } = await import('./settings-local.js')
+          writeSettingsToken(cfg.settingsLocalPath, value)
+          console.log(`[rotate] Updated ${cfg.settingsLocalPath}`)
+        } catch (err) {
+          console.warn(`[rotate] Could not update ${cfg.settingsLocalPath} (${(err as Error).message}); the token is in 1Password, run \`environment-manager sync ${env} --apply\` to retry`)
+        }
+      }
+      return [{ name: secret.name, env, status: 'ok' }]
     }
     case 'github-pat': {
       return [{

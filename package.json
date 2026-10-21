@@ -1,6 +1,6 @@
 {
   "name": "@critical-labs/environment-manager",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Declarative environment variable sync, secret rotation, fingerprint verification, and .env rendering, driven by a .environment-manager/ config directory.",
   "keywords": [
     "environment-variables",

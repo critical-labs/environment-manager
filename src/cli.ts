@@ -19,6 +19,8 @@ import { reconcileClaudeCode, type ClaudeCodeReconcileResult } from './reconcile
 import { selectDue } from './due.js'
 import { resolveGitHubToken } from './github-token.js'
 import { notify } from './notify.js'
+import { writeSettingsToken } from './settings-local.js'
+import { resolveOpField } from './op-field.js'
 import { installSchedule, packageVersion, scheduleStatus, uninstallSchedule } from './schedule.js'
 import type { Adapters, RotationConfig, RotationOutcome, RotationStalenessWarning, GitHubSecretVerification } from './types.js'
 
@@ -38,6 +40,11 @@ function requireEnv(key: string): string {
 
 async function bootstrapEnv(root: string): Promise<void> {
   const config = loadRotationConfig(root)
+  const errors = validateRotationConfig(config)
+  if (errors.length) {
+    console.error(`Config validation failed:\n${errors.map((e) => `  x ${e}`).join('\n')}`)
+    process.exit(1)
+  }
   await resolveToolEnv(config.toolEnv, new OnePasswordSecretStore())
 }
 
@@ -223,6 +230,15 @@ program
     if (opts.apply) {
       const ccResults = await reconcileClaudeCode(rotationConfig.secrets, env, readOpField)
       printClaudeCodeReconcile(ccResults)
+
+      // A scheduled rotation cannot reach the repository; refresh local settings tokens here.
+      for (const secret of rotationConfig.secrets) {
+        const cfg = secret.opServiceAccount
+        if (secret.type !== 'op-service-account' || !cfg || !secret.onePassword || !secret.environments.includes(env)) continue
+        const token = await readOpField(secret.onePassword.itemId, resolveOpField(secret.onePassword.field, env))
+        const changed = writeSettingsToken(cfg.settingsLocalPath, token)
+        console.log(`  ${changed ? '~' : '='} ${cfg.settingsLocalPath}: OP_SERVICE_ACCOUNT_TOKEN ${changed ? 'updated' : 'up to date'}`)
+      }
     }
 
     // Check for stale external secrets that need manual rotation
@@ -348,7 +364,9 @@ async function runRotate(root: string, env: string, opts: {
     printOidcReconcile(oidcResults)
 
     if (adapters.ciSecrets) {
-      const ghResults = await reconcileGitHubSecrets(rotationConfig.secrets, env, adapters.ciSecrets)
+      // Only what this run rotated: a config change cannot widen a scheduled run's reach.
+      const rotated = new Set(allResults.filter((r) => r.status === 'ok').map((r) => r.name))
+      const ghResults = await reconcileGitHubSecrets(rotationConfig.secrets.filter((s) => rotated.has(s.name)), env, adapters.ciSecrets)
       printGitHubReconcile(ghResults)
     }
 
@@ -360,7 +378,8 @@ async function runRotate(root: string, env: string, opts: {
 
   const rotated = allResults.filter((r) => r.status === 'ok').map((r) => r.name)
   if (opts.notify && opts.apply && rotated.length) {
-    await notify('environment-manager', `Rotated in ${env}: ${rotated.join(', ')}`)
+    const needsSync = process.env.EM_SCHEDULED && secrets.some((x) => x.type === 'op-service-account' && rotated.includes(x.name))
+    await notify('environment-manager', `Rotated in ${env}: ${rotated.join(', ')}${needsSync ? `. Run \`environment-manager sync ${env} --apply\` in the repository.` : ''}`)
   }
 }
 
@@ -402,7 +421,9 @@ schedule
     console.log(`  when:  at login, and daily at ${String(hour).padStart(2, '0')}:00`)
     console.log(`  log:   ${result.logPath}`)
     console.log(`  plist: ${result.plistPath}`)
-    console.log('It runs once now. Re-run install after upgrading this package to move the pin.')
+    console.log(`  data:  ${result.dataPath}`)
+    console.log('It runs once now. It uses the copy of rotation.yaml taken just now: re-run install after')
+    console.log('changing rotation.yaml or upgrading this package.')
   })
 
 schedule
@@ -427,6 +448,7 @@ schedule
       console.log(`  pinned release: ${s.pinnedVersion}${s.pinnedVersion === current ? '' : ` (this is ${current}; re-run install to move the pin)`}`)
     }
     if (s.lastExitCode) console.log(`  last exit code: ${s.lastExitCode}`)
+    if (s.configChanged) console.log('  rotation.yaml has changed since install; the schedule still uses the old copy. Re-run install to approve it.')
     console.log(`  log: ${s.logPath}`)
     for (const line of s.logTail) console.log(`    ${line}`)
 

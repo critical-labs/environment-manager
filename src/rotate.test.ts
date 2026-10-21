@@ -185,6 +185,8 @@ describe('rotateSecret', () => {
   let adapters: Adapters
 
   beforeEach(() => {
+    vi.resetModules()
+    vi.doUnmock('node:fs')
     vi.clearAllMocks()
     adapters = createMockAdapters()
   })
@@ -539,6 +541,7 @@ describe('rotateSecret', () => {
       readFileSync: () => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }) },
       writeFileSync,
       mkdirSync,
+      chmodSync: vi.fn(),
       chmodSync,
     }))
 
@@ -559,6 +562,58 @@ describe('rotateSecret', () => {
     expect(writeFileSync.mock.calls[0][2]).toEqual({ encoding: 'utf-8', mode: 0o600 })
     expect(chmodSync).toHaveBeenCalledWith('.claude/settings.local.json', 0o600)
     expect(adapters.secrets.write).toHaveBeenCalledWith('op-item', 'op_token', 'ops_fresh_token')
+    expect(results[0].status).toBe('ok')
+  })
+
+  it('op-service-account: in a scheduled run, stores the token in 1Password and leaves the settings file alone', async () => {
+    const { execFile } = await import('node:child_process')
+    vi.mocked(execFile).mockImplementation(
+      ((...args: unknown[]) => Promise.resolve({ stdout: args[0] === 'op' ? 'ops_sched\n' : '', stderr: '' })) as never,
+    )
+    const writeFileSync = vi.fn()
+    vi.doMock('node:fs', () => ({ existsSync: () => true, mkdirSync: vi.fn(), readFileSync: () => '{}', writeFileSync, chmodSync: vi.fn() }))
+    process.env.EM_SCHEDULED = '1'
+    try {
+      const { rotateSecret } = await import('./rotate.js')
+      const results = await rotateSecret({
+        name: 'op-sa-token',
+        type: 'op-service-account',
+        opServiceAccount: {
+          accountName: 'a', vault: 'V', permissions: 'read_items', expiresIn: '90d',
+          settingsLocalPath: '.claude/settings.local.json', githubSecretName: 'T', githubRepo: 'o/r',
+        },
+        onePassword: { itemId: 'op-item', field: 'op_token' },
+        environments: ['production'],
+      }, 'production', adapters, false)
+      expect(adapters.secrets.write).toHaveBeenCalledWith('op-item', 'op_token', 'ops_sched')
+      expect(writeFileSync).not.toHaveBeenCalled()
+      expect(results[0].status).toBe('ok')
+    } finally {
+      delete process.env.EM_SCHEDULED
+    }
+  })
+
+  it('op-service-account: a settings write failure is a warning once the token is in 1Password', async () => {
+    const { execFile } = await import('node:child_process')
+    vi.mocked(execFile).mockImplementation(
+      ((...args: unknown[]) => Promise.resolve({ stdout: args[0] === 'op' ? 'ops_x\n' : '', stderr: '' })) as never,
+    )
+    vi.doMock('node:fs', () => ({
+      existsSync: () => true, mkdirSync: vi.fn(), readFileSync: () => '{}', chmodSync: vi.fn(),
+      writeFileSync: () => { throw new Error('EPERM') },
+    }))
+    const { rotateSecret } = await import('./rotate.js')
+    const results = await rotateSecret({
+      name: 'op-sa-token',
+      type: 'op-service-account',
+      opServiceAccount: {
+        accountName: 'a', vault: 'V', permissions: 'read_items', expiresIn: '90d',
+        settingsLocalPath: '.claude/settings.local.json', githubSecretName: 'T', githubRepo: 'o/r',
+      },
+      onePassword: { itemId: 'op-item', field: 'op_token' },
+      environments: ['production'],
+    }, 'production', adapters, false)
+    expect(adapters.secrets.write).toHaveBeenCalledWith('op-item', 'op_token', 'ops_x')
     expect(results[0].status).toBe('ok')
   })
 

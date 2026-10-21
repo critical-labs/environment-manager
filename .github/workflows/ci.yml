@@ -23,9 +23,9 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - run: npm run check
-      - run: npm test
       - run: npm run build
+      - run: npm test
       - name: Smoke-test built CLI
         run: node dist/cli.js --help > /dev/null

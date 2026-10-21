@@ -27,7 +27,7 @@ function run(cwd: string, args: string[]): { code: number; out: string } {
   try {
     // An empty PATH: if anything reaches for op or gh, the run fails.
     const out = execFileSync(process.execPath, [CLI_PATH, ...args], {
-      cwd, encoding: 'utf-8', env: { PATH: '' }, stdio: ['ignore', 'pipe', 'pipe'],
+      cwd, encoding: 'utf-8', env: { PATH: '', EM_STATE_FILE: join(cwd, 'state.json') }, stdio: ['ignore', 'pipe', 'pipe'],
     })
     return { code: 0, out }
   } catch (err: any) {
@@ -47,7 +47,7 @@ describe('rotate --due and record', () => {
   afterEach(() => rmSync(repo, { recursive: true, force: true }))
 
   it('with nothing due, exits 0 without resolving credentials', () => {
-    writeFileSync(join(repo, '.environment-manager', 'rotation-state.json'), JSON.stringify({
+    writeFileSync(join(repo, 'state.json'), JSON.stringify({
       lastRotated: { 'production/session-secret': new Date().toISOString() },
     }))
     const { code, out } = run(repo, ['rotate', 'production', '--due', '--apply'])
@@ -56,7 +56,7 @@ describe('rotate --due and record', () => {
   })
 
   it('never selects external secrets, but warns that they are stale', () => {
-    writeFileSync(join(repo, '.environment-manager', 'rotation-state.json'), JSON.stringify({
+    writeFileSync(join(repo, 'state.json'), JSON.stringify({
       lastRotated: { 'production/session-secret': new Date().toISOString() },
     }))
     const { out } = run(repo, ['rotate', 'production', '--due'])
@@ -68,7 +68,7 @@ describe('rotate --due and record', () => {
     const { code, out } = run(repo, ['record', 'production', 'manual-key'])
     expect(code).toBe(0)
     expect(out).toContain('Recorded manual-key')
-    const state = JSON.parse(readFileSync(join(repo, '.environment-manager', 'rotation-state.json'), 'utf-8'))
+    const state = JSON.parse(readFileSync(join(repo, 'state.json'), 'utf-8'))
     expect(Object.keys(state.lastRotated)).toEqual(['production/manual-key'])
   })
 
