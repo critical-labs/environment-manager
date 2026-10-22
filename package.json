@@ -38,7 +38,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "CHANGELOG.md"
   ],
   "bin": {
     "environment-manager": "./dist/cli.js"
@@ -47,7 +48,8 @@
     "build": "tsc",
     "check": "tsc --noEmit",
     "prepare": "husky && npm run build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "changelog": "git-cliff -o CHANGELOG.md"
   },
   "dependencies": {
     "commander": "^11.1.0",

@@ -20,6 +20,8 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    outputs:
+      published: ${{ steps.registry.outputs.published }}
     steps:
       - name: Check the tagged commit is on main
         run: |
@@ -44,6 +46,14 @@ jobs:
             echo "::error::tag $GITHUB_REF_NAME does not match package.json version $version (want v$version)"
             exit 1
           fi
+      - name: Check whether this version is already on npm
+        id: registry
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          if npm view "@critical-labs/environment-manager@$version" version >/dev/null 2>&1; then
+            echo "::notice::$version is already published; nothing to stage"
+            echo published=true >> "$GITHUB_OUTPUT"
+          fi
       - run: npm ci --ignore-scripts
       - run: npm run build
       - run: npm test
@@ -59,6 +69,7 @@ jobs:
 
   publish:
     needs: test
+    if: needs.test.outputs.published != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -89,3 +100,32 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
+
+  # Release notes for this tag, generated from its Conventional Commits.
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - run: npm ci --ignore-scripts
+      - run: npx --no-install git-cliff --current --strip header -o "$RUNNER_TEMP/notes.md"
+      - name: Create or update the GitHub release
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
+          else
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
