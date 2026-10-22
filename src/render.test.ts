@@ -70,6 +70,13 @@ describe('renderDotenv', () => {
     expect(out.endsWith('\n')).toBe(true)
   })
 
+  it('names the manifest and the command that regenerates it', () => {
+    const out = renderDotenv({ FOO: 'bar' }, 'production')
+    expect(out).toContain('.environment-manager/production.manifest.yaml')
+    expect(out).toContain('environment-manager render production')
+    expect(out).not.toContain('<name>')
+  })
+
   it('refuses to write a value containing a newline', () => {
     expect(() => renderDotenv({ BAD: 'line1\nline2' })).toThrow(/BAD/)
   })

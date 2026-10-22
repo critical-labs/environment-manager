@@ -113,7 +113,7 @@ function printGitHubReconcile(results: GitHubReconcileResult[]): void {
 
 function printOidcReconcile(results: OidcReconcileResult[]): void {
   if (results.length === 0) return
-  console.log('\nOIDC Client Secrets (IDP Database):')
+  console.log('\nOIDC Client Secrets:')
   for (const r of results) {
     const icon = r.status === 'ok' ? '=' : r.status === 'updated' ? '+' : r.status === 'drift' ? '!' : 'x'
     const label = `  ${icon} ${r.clientId} (${r.secretName})`
@@ -206,7 +206,7 @@ program
   .command('sync')
   .argument('<env>', 'Environment key in rotation.yaml: preview or production')
   .option('--apply', 'Actually reconcile (default is dry-run)', false)
-  .description('Reconcile 1Password values into the IDP database, GitHub secrets and Claude Code')
+  .description('Push 1Password values to GitHub Actions secrets, OIDC client databases and Claude Code settings (preview unless --apply)')
   .action(async (env: string, opts: { apply: boolean }) => {
     const root = getRepoRoot()
     await bootstrapEnv(root)
@@ -255,7 +255,7 @@ program
   .option('--mode <mode>', 'db, secrets, or all', 'all')
   .option('--due', 'Only what rotationIntervalDays says is due (what `schedule` runs)', false)
   .option('--notify', 'Post a desktop notification with the outcome (macOS)', false)
-  .description('Rotate credentials to 1Password, then reconcile the IDP database and GitHub secrets.')
+  .description('Rotate secrets and database passwords into 1Password, then push them to GitHub and OIDC client databases (preview unless --apply)')
   .option('--skip-sync', 'Skip the automatic reconcile after rotation', false)
   .action(async (env: string, opts: {
     apply: boolean
@@ -353,11 +353,11 @@ async function runRotate(root: string, env: string, opts: {
     process.exit(1)
   }
 
-  // After a successful rotation, reconcile OIDC + GitHub secrets so the IDP
+  // After a successful rotation, reconcile OIDC + GitHub secrets so the OIDC
   // database and CI never drift from 1Password.
   if (opts.apply && !opts.skipSync) {
     console.log('\n' + '='.repeat(60))
-    console.log('Reconciling rotated values into the IDP database and GitHub...')
+    console.log('Pushing rotated values to OIDC client databases and GitHub...')
     console.log('='.repeat(60) + '\n')
 
     const oidcResults = await reconcileOidcClients(rotationConfig, env, adapters)
@@ -513,7 +513,7 @@ program
       printRender(result)
       return
     }
-    writeEnvFile(opts.out, result.env)
+    writeEnvFile(opts.out, result.env, name)
     printRender(result, opts.out)
   })
 
