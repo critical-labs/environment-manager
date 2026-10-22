@@ -214,9 +214,27 @@ When the secret changes, the old value moves to `previous_client_secret`, so a p
 
 Run `npx environment-manager <command> --help` for every option.
 
+## Contributing
+
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org): `feat: ...`, `fix: ...`, `docs: ...`, and so on, with `!` or a `BREAKING CHANGE:` footer for breaking changes. `npm install` sets up a hook that checks each message, and CI rejects pull requests whose commits do not follow the format. [CHANGELOG.md](CHANGELOG.md) is generated from these messages, so write them for the people reading it.
+
 ## Releasing
 
-Bump `version` in `package.json` on `main` and push a `v<version>` tag. The publish workflow stages the release on npm, and a maintainer approves it on npmjs.com.
+1. On a branch, set the version and regenerate the changelog:
+
+   ```sh
+   npm version 1.2.3 --no-git-tag-version
+   npx git-cliff --tag v1.2.3 -o CHANGELOG.md
+   git commit -am "chore(release): v1.2.3"
+   ```
+
+2. Merge it to `main`, then tag that commit and push the tag:
+
+   ```sh
+   git tag -a v1.2.3 -m v1.2.3 && git push origin v1.2.3
+   ```
+
+The publish workflow stages the release on npm, where a maintainer approves it, and creates a GitHub release with the same notes.
 
 ## License
 
