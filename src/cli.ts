@@ -24,6 +24,15 @@ import { resolveOpField } from './op-field.js'
 import { installSchedule, packageVersion, scheduleStatus, uninstallSchedule } from './schedule.js'
 import type { Adapters, RotationConfig, RotationOutcome, RotationStalenessWarning, GitHubSecretVerification } from './types.js'
 
+/** One line for the user; EM_DEBUG=1 adds the stack. */
+function describeError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err)
+  if (/spawn op ENOENT/.test(message)) {
+    return 'The 1Password CLI (op) was not found. Install it and turn on its desktop app integration: https://developer.1password.com/docs/cli/get-started/'
+  }
+  return message
+}
+
 function getRepoRoot(): string {
   return resolve(process.cwd())
 }
@@ -270,8 +279,7 @@ program
     try {
       await runRotate(root, env, opts)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      console.error(`Rotation failed: ${message}`)
+      console.error(`Rotation failed: ${describeError(err)}`)
       // The message can quote tool output; keep it out of Notification Center.
       if (opts.notify) await notify('environment-manager', `Rotation failed in ${env}. See the log.`)
       process.exit(1)
@@ -517,4 +525,9 @@ program
     printRender(result, opts.out)
   })
 
-program.parse()
+program.parseAsync().catch((err) => {
+  console.error(`Error: ${describeError(err)}`)
+  // biome-ignore lint/nursery/noProcessEnv: CLI entry point reads env vars directly
+  if (process.env.EM_DEBUG && err instanceof Error) console.error(err.stack)
+  process.exit(1)
+})

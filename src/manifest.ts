@@ -9,6 +9,17 @@ function configPath(repoRoot: string, filename: string): string {
   return resolve(repoRoot, CONFIG_DIR, filename)
 }
 
+function readConfig(repoRoot: string, filename: string, hint: string): string {
+  try {
+    return readFileSync(configPath(repoRoot, filename), 'utf-8')
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error(`No ${CONFIG_DIR}/${filename} in ${resolve(repoRoot)}. ${hint}`)
+    }
+    throw err
+  }
+}
+
 function resolveManifestValues(raw: Record<string, ManifestValue>): Record<string, string> {
   return Object.fromEntries(
     Object.entries(raw).map(([key, val]) => [
@@ -19,7 +30,7 @@ function resolveManifestValues(raw: Record<string, ManifestValue>): Record<strin
 }
 
 export function loadManifest(repoRoot: string, env: string): Manifest {
-  const raw = readFileSync(configPath(repoRoot, `${env}.manifest.yaml`), 'utf-8')
+  const raw = readConfig(repoRoot, `${env}.manifest.yaml`, 'Run from the repository root, and check the manifest name.')
   const parsed = parseYaml(raw) ?? {}
   const rawShared = (parsed.shared ?? {}) as Record<string, ManifestValue>
   const rawProjects = (parsed.projects ?? {}) as Record<string, Record<string, ManifestValue>>
@@ -36,7 +47,7 @@ export function loadManifest(repoRoot: string, env: string): Manifest {
 }
 
 export function loadRotationConfig(repoRoot: string): RotationConfig {
-  const raw = readFileSync(configPath(repoRoot, 'rotation.yaml'), 'utf-8')
+  const raw = readConfig(repoRoot, 'rotation.yaml', 'Run from the repository root; sync, verify, rotate, record and schedule need it.')
   const parsed = parseYaml(raw) ?? {}
   // The op helpers read the vault from OP_VAULT at call time; an explicit
   // OP_VAULT in the environment wins over the config file.
